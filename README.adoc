@@ -1,15 +1,16 @@
 = Cheburnet
 
 ----
- [Cross-border WAN]    [Domestic WAN]
-         ^                   ^
-         |                   |
-       SNAT      GRE       SNAT  GRE over IPsec
-       [R3] <------------- [R2] <============== [R1]
-              OSPF routes             0/0
 
-     Foreign             Domestic            Home/Office
-     router               router               router
+     [Cross-border WAN]         [Domestic WAN]
+             ^                        ^
+             |                        |
+           SNAT         GRE         SNAT    GRE over IPsec
+           [R3] <------------------ [R2] <=================== [R1]
+                    OSPF routes                  0/0
+
+         Foreign                  Domestic                 Home/Office
+         router                    router                    router
 
 ----
 

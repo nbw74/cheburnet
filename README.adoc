@@ -18,6 +18,7 @@
 . Install FRR on R2 and R3 (optionally on R1)
 . Enable OSPF daemon on routers (see *frr.conf* for R3 configuration example)
 . Setup SNAT on R2 and R3
-. On R3: place *interface* and *routes* configuration files in /etc/cheburnet/
+. On R3: place *interface* and *routes* configuration files in /etc/cheburnet/, place *cheburnet.sh* in /usr/local/bin/
 . On R3: run *cheburnet.sh* for setup static routes
 . On R1: configure default route (0.0.0.0/0) pointing to R2
+. On R3: place *cron* file in */etc/cron.d/cheburnet*

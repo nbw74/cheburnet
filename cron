@@ -1,0 +1,6 @@
+# /etc/cron.d/cheburnet
+#
+# routes-inject-onboot
+@reboot root /bin/bash -c "until /usr/bin/host -4 example.com >/dev/null; do sleep 2; done; /usr/local/bin/cheburnet.sh"
+# routes-actualize
+4 0 * * * root /usr/local/bin/cheburnet.sh

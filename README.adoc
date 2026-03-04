@@ -7,7 +7,7 @@
              |                        |
            SNAT         GRE         SNAT    GRE over IPsec
            [R3] <------------------ [R2] <=================== [R1]
-                    OSPF routes                  0/0
+                   STATIC routes                  0/0
 
          Foreign                  Domestic                 Home/Office
          router                    router                    router

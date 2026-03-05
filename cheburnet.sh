@@ -9,7 +9,7 @@ set -o pipefail
 IFS=$'\n\t'
 
 # DEFAULTS BEGIN
-typeset -i DEBUG=0
+typeset -i DEBUG=0 ACL_FORM=0 ACL_TGFB_ONLY=0 ACL_MAXDENY_ONLY=0
 # DEFAULTS END
 
 # CONSTANTS BEGIN
@@ -40,17 +40,38 @@ main() {
     fi
 
     checks
+
+    # Get google &b facebook routes
+    typeset -a GoogleRoutes=() FacebookRoutes=() TelegramRoutes=()
+
+    if (( ACL_FORM ))
+    then
+	if (( ACL_TGFB_ONLY ))
+	then
+	    echo -e "configure terminal\n"
+	    acl_form_tgfb
+	    echo "end"
+	elif (( ACL_MAXDENY_ONLY ))
+	then
+	    echo -e "configure terminal\n"
+	    acl_form_maxdeny
+	    echo "end"
+	else
+	    echo -e "configure terminal\n"
+	    acl_form_tgfb
+	    acl_form_maxdeny
+	    echo "end"
+	fi
+
+	exit 0
+    fi
     # Read settings
     source "/etc/${bn%\.*}/interface.conf"
     source "/etc/${bn%\.*}/routes.conf"
 
-    (( DEBUG )) && echo "${ROUTES[@]}"
+    (( DEBUG )) && echo "DEBUG: ROUTES[${ROUTES[*]}]"
 
-    # Get google &b facebook routes
-    typeset -a GoogleRoutes=() FacebookRoutes=() TelegramRoutes=()
-    mapfile -t GoogleRoutes < <(curl -sS $GOOGLE_URL | grep -P '(\d{1,3}\.){3}\d{1,3}/\d{1,2}')
-    mapfile -t FacebookRoutes < <(curl -sS $FACEBOOK_URL | grep -P '(\d{1,3}\.){3}\d{1,3}/\d{1,2}')
-    mapfile -t TelegramRoutes < <(curl -sS $TELEGRAM_URL | grep -P '(\d{1,3}\.){3}\d{1,3}/\d{1,2}')
+    _get_socnet_routes
 
     ROUTES+=( "${GoogleRoutes[@]}" )
     ROUTES+=( "${FacebookRoutes[@]}" )
@@ -103,6 +124,98 @@ main() {
     done
 
     exit 0
+}
+
+_get_socnet_routes() {
+    local fn=${FUNCNAME[0]}
+
+    mapfile -t GoogleRoutes < <(curl -sS $GOOGLE_URL | grep -P '(\d{1,3}\.){3}\d{1,3}/\d{1,2}')
+    mapfile -t FacebookRoutes < <(curl -sS $FACEBOOK_URL | grep -P '(\d{1,3}\.){3}\d{1,3}/\d{1,2}')
+    mapfile -t TelegramRoutes < <(curl -sS $TELEGRAM_URL | grep -P '(\d{1,3}\.){3}\d{1,3}/\d{1,2}')
+}
+
+acl_form_maxdeny() {
+    local fn=${FUNCNAME[0]}
+
+    local -i d=0 n=0 r=0 u=0
+
+    local -a MaxBlockedDomains=(
+	api.ipify.org
+	api.oneme.ru
+	checkip.amazonaws.com
+	ifconfig.co
+	ifconfig.io
+	ifconfig.me
+	ip.mail.ru
+	ipleak.net
+	ipinfo.io
+	ipv4-internet.yandex.net
+    )
+
+    for (( d = 0; d < ${#MaxBlockedDomains[@]}; d++ ))
+    do
+	echo "object-group network MAX_DENY_${MaxBlockedDomains[d]//\./-}"
+
+	local -a AllResolvedIpAddresses=() NsList=() UniqueIpAddresses=()
+
+	local base_domain=""
+	base_domain=$(echo "${MaxBlockedDomains[d]}" | gawk -F. '{ print $(NF-1)"."$NF }')
+
+	mapfile -t NsList < <(dig +short "$base_domain" ns)
+
+	(( DEBUG )) && echo "DEBUG: NsList[${NsList[*]}]"
+
+	for (( n = 0; n < ${#NsList[@]}; n++ ))
+	do
+	    local -a ResolvedIpAddresses=()
+	    mapfile -t ResolvedIpAddresses < <(dig +short "@${NsList[n]}" "${MaxBlockedDomains[d]}" | grep -v '\.$')
+	    AllResolvedIpAddresses+=( "${ResolvedIpAddresses[@]}" )
+
+	    (( DEBUG )) && echo "DEBUG: ResolvedIpAddresses[${ResolvedIpAddresses[*]}]"
+	    (( DEBUG )) && echo "DEBUG: AllResolvedIpAddresses[${AllResolvedIpAddresses[*]}]"
+	done
+
+	if [[ -z ${AllResolvedIpAddresses[*]} ]]
+	then
+	    mapfile -t AllResolvedIpAddresses < <(dig +short "${MaxBlockedDomains[d]}" | grep -v '\.$')
+	fi
+
+	read -r -d '' -a UniqueIpAddresses < <(printf '%s\n' "${AllResolvedIpAddresses[@]}" | sort -Vu && printf '\0')
+
+	for (( u = 0; u < ${#UniqueIpAddresses[@]}; u++ ))
+	do
+	    echo " host ${UniqueIpAddresses[u]}"
+	done
+	echo -e "exit\n"
+
+    done
+
+    echo "object-group network MAX_DENY_SUM"
+    for (( d = 0; d < ${#MaxBlockedDomains[@]}; d++ ))
+    do
+	echo " group-object MAX_DENY_${MaxBlockedDomains[d]//\./-}"
+    done
+    echo -e "exit\n"
+}
+
+acl_form_tgfb() {
+    local fn=${FUNCNAME[0]}
+
+    _get_socnet_routes
+
+    echo "object-group network CIDR-FB"
+    for (( r = 0; r < ${#FacebookRoutes[@]}; r++ ))
+    do
+	echo " ${FacebookRoutes[r]/\// /}"
+    done
+    echo -e "exit\n"
+
+    echo "object-group network CIDR-TG"
+    for (( r = 0; r < ${#TelegramRoutes[@]}; r++ ))
+    do
+	echo " ${TelegramRoutes[r]/\// /}"
+    done
+    echo -e "exit\n"
 }
 
 checks() {
@@ -169,6 +282,9 @@ usage() {
     echo -e "\\n    Usage: $bn [OPTIONS]\\n
     Options:
 
+    -a, --acl			print ACL for Cisco ISR G2 and exit
+	--tgfb			    get only Telegram and Facebook CIDRs
+	--maxdeny		    get only MAX messenger deny list
     -d, --debug			debug mode
     -h, --help			print help
 "
@@ -176,7 +292,7 @@ usage() {
 # Getopts
 getopt -T; (( $? == 4 )) || { echo "incompatible getopt version" >&2; exit 4; }
 
-if ! TEMP=$(getopt -o dh --longoptions debug,help -n "$bn" -- "$@")
+if ! TEMP=$(getopt -o adh --longoptions acl,debug,help,tgfb,maxdeny -n "$bn" -- "$@")
 then
     echo "Terminating..." >&2
     exit 1
@@ -188,7 +304,10 @@ unset TEMP
 while true
 do
     case $1 in
+	-a|--acl)		ACL_FORM=1 ;	shift	;;
 	-d|--debug)		DEBUG=1 ;	shift	;;
+	--tgfb)			ACL_TGFB_ONLY=1 ;	shift ;;
+	--maxdeny)		ACL_MAXDENY_ONLY=1 ;	shift ;;
 	-h|--help)		usage ;		exit 0	;;
 	--)			shift ;		break	;;
 	*)			usage ;		exit 1
